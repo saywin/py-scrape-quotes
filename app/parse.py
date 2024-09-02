@@ -1,11 +1,19 @@
 import csv
-from dataclasses import dataclass, fields, astuple
+from dataclasses import dataclass, fields
 import requests
 from bs4 import BeautifulSoup
+from slugify import slugify
+
+
+def custom_slugify(text):
+    text = text.replace("'", "").replace(" ", "-")
+    url_text = slugify(text, lowercase=False)
+    return url_text
 
 
 URL = "https://quotes.toscrape.com/"
 QUOTE_OUTPUT_CSV_PATH = "quotes.csv"
+AUTHORS_OUTPUT_CSV_PATH = "authors.csv"
 
 
 @dataclass
@@ -15,7 +23,24 @@ class Quote:
     tags: list[str]
 
 
-def parse_single_quote(quote) -> Quote:
+@dataclass
+class Author:
+    author_name: str
+    birth_date: str
+    place_of_birth: str
+    description: str
+
+
+def parse_single_author(author: BeautifulSoup) -> Author:
+    return Author(
+        author_name=author.select_one(".author-title").text,
+        birth_date=author.select_one(".author-born-date").text,
+        place_of_birth=author.select_one(".author-born-location").text,
+        description=author.select_one(".author-description").text
+    )
+
+
+def parse_single_quote(quote: BeautifulSoup) -> Quote:
     return Quote(
         text=quote.select_one(".text").text,
         author=quote.select_one(".author").text,
@@ -26,6 +51,19 @@ def parse_single_quote(quote) -> Quote:
 def get_list_quotes(soup: BeautifulSoup) -> [Quote]:
     all_quotes = soup.select(".quote")
     return [parse_single_quote(quote) for quote in all_quotes]
+
+
+def get_author_details(author_name: str, cache: dict) -> Author:
+    if author_name not in cache:
+        print(slugify(author_name))
+        author_url = URL + f"/author/{custom_slugify(author_name)}"
+        page_author = requests.get(author_url).content
+        soup = BeautifulSoup(page_author, "html.parser")
+        author = parse_single_author(soup)
+        print(author_name, author)
+        cache[author_name] = author
+
+        return author
 
 
 def get_page_number() -> int:
@@ -44,36 +82,67 @@ def get_page_number() -> int:
     return page_number
 
 
-def get_quotes() -> [Quote]:
-    page = requests.get(URL).content
-    first_page_quotes = BeautifulSoup(page, "html.parser")
-    all_quotes = get_list_quotes(first_page_quotes)
-
+def get_quotes(cache: dict) -> [Quote]:
+    all_quotes = []
     page_numbers = get_page_number()
 
-    for page_num in range(2, page_numbers + 1):
+    for page_num in range(1, page_numbers + 1):
         page = requests.get(URL + f"/page/{page_num}/").content
         soup = BeautifulSoup(page, "html.parser")
-        all_quotes.extend(
-            get_list_quotes(soup)
-        )
+        quotes_on_page = get_list_quotes(soup)
+        all_quotes.extend(quotes_on_page)
+
+        for quote in quotes_on_page:
+            get_author_details(quote.author, cache)
     return all_quotes
-
-
-QUOTE_FIELDS = [field.name for field in fields(Quote)]
 
 
 def write_quites_to_csv(quotes: [Quote]) -> None:
     with open(QUOTE_OUTPUT_CSV_PATH, "w", encoding="utf8", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(QUOTE_FIELDS)
+        writer.writerow([field.name for field in fields(Quote)])
         for quote in quotes:
             writer.writerow([quote.text, quote.author, ", ".join(quote.tags)])
 
 
+def write_authors_to_csv(authors: [Author]) -> None:
+    with open(AUTHORS_OUTPUT_CSV_PATH, "w", encoding="utf8", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow([field.name for field in fields(Author)])
+        for author in authors.values():
+            writer.writerow([
+                author.author_name,
+                author.birth_date,
+                author.place_of_birth,
+                author.description
+            ])
+
+
+def get_all_authors_from_csv() -> dict:
+    authors = {}
+    with open(AUTHORS_OUTPUT_CSV_PATH, "r", encoding="utf8", newline="") as file:
+        csv_reader = csv.DictReader(file)
+        for row in csv_reader:
+            author = Author(
+                author_name=row['author_name'],
+                birth_date=row['birth_date'],
+                place_of_birth=row['place_of_birth'],
+                description=row['description']
+            )
+            authors[author.author_name] = author
+    return authors
+
+
 def main(output_csv_path: str) -> None:
-    write_quites_to_csv(get_quotes())
+    quotes = get_quotes(cache_author)
+    write_quites_to_csv(quotes)
+    write_authors_to_csv(cache_author)
 
 
 if __name__ == "__main__":
+    try:
+        cache_author = get_all_authors_from_csv()
+    except FileNotFoundError:
+        cache_author = {}
     main("quotes.csv")
+
