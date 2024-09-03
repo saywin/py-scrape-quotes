@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 
 
 URL = "https://quotes.toscrape.com/"
-QUOTE_OUTPUT_CSV_PATH = "quotes.csv"
+QUOTE_OUTPUT_CSV_PATH = "result.csv"
 AUTHORS_OUTPUT_CSV_PATH = "authors.csv"
 
 
@@ -53,7 +53,6 @@ def get_author_details(
         author_url: str,
         cache: dict
 ) -> Author:
-    print(author_name in cache_author)
     if author_name not in cache:
         page_author = requests.get(author_url).content
         soup = BeautifulSoup(page_author, "html.parser")
@@ -99,7 +98,7 @@ def write_quites_to_csv(quotes: list[Quote]) -> None:
         writer = csv.writer(file)
         writer.writerow([field.name for field in fields(Quote)])
         for quote in quotes:
-            writer.writerow([quote.text, quote.author, ", ".join(quote.tags)])
+            writer.writerow([quote.text, quote.author, quote.tags])
 
 
 def write_authors_to_csv(authors: list[Author]) -> None:
@@ -140,15 +139,14 @@ def get_all_authors_from_csv() -> dict:
 
 
 def main(output_csv_path: str) -> None:
+    cache_author = get_all_authors_from_csv()
     quotes = get_quotes(cache_author)
 
     write_quites_to_csv(quotes)
 
     authors_list = list(cache_author.values())
     write_authors_to_csv(authors_list)
-    print(cache_author)
 
 
 if __name__ == "__main__":
-    cache_author = get_all_authors_from_csv()
-    main("quotes.csv")
+    main("result.csv")
